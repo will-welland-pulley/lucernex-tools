@@ -1,0 +1,597 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Walmart Lucernex Tracker</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2c2e87; --accent-soft: #ecedf8; --good: #137a4b; --good-soft: #e5f4ec;
+    --warn: #9a5b00; --warn-soft: #fdf1dc; --bad: #b42318; --bad-soft: #fdecea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12141a; --panel: #1b1e26; --text: #e6e8ee; --muted: #9aa1ad; --line: #2c303b;
+      --accent: #a9abf5; --accent-soft: #262a45; --good: #5fd39a; --good-soft: #17301f;
+      --warn: #f0b85a; --warn-soft: #33280f; --bad: #f28b82; --bad-soft: #3a1c1a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 "Segoe UI", system-ui, -apple-system, sans-serif; }
+  header { padding: 20px 24px 8px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  .synced { color: var(--muted); font-size: 13px; }
+  .synced.stale { color: var(--bad); font-weight: 600; }
+  main { padding: 0 24px 24px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin: 12px 0 20px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .kpi .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .value { font-size: 24px; font-weight: 650; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .kpi .sub { color: var(--muted); font-size: 12px; }
+  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; overflow-x: auto; }
+  nav button { border: 0; background: none; color: var(--muted); font: inherit; font-weight: 600;
+               padding: 10px 14px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; }
+  nav button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  nav .count { font-weight: 500; color: var(--muted); margin-left: 4px; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+  input[type=search] { flex: 1 1 320px; max-width: 460px; padding: 9px 12px; border-radius: 8px;
+                       border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; }
+  .hint { color: var(--muted); font-size: 12px; margin: -4px 0 10px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; }
+  .filter { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  select { padding: 7px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel);
+           color: var(--text); font: inherit; font-size: 13px; }
+  .rowcount { color: var(--muted); font-size: 12px; margin-left: auto; font-variant-numeric: tabular-nums; }
+  /* The table scrolls inside the panel (both ways) so its header and first column stay put. */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: auto; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; cursor: pointer; user-select: none;
+       line-height: 1.25; position: sticky; top: 0; z-index: 2; background: var(--panel); }
+  thead tr.groups th { cursor: default; text-align: center; color: var(--text); border-bottom: 1px solid var(--line); }
+  thead tr.groups th.grouped { border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+  thead tr.cols th { top: calc(var(--group-row-h, 1px) - 1px); }  td.nowrap { white-space: nowrap; }
+  tr.section td { background: var(--accent-soft); padding: 10px 12px; }
+  .section-title { font-weight: 700; font-size: 14px; margin-right: 10px; color: var(--text); }
+  /* First data column stays visible while scrolling sideways. */
+  .stick { position: sticky; left: 0; z-index: 1; background: var(--panel); min-width: 230px; max-width: 300px;
+           box-shadow: 1px 0 0 var(--line); }
+  th.stick { z-index: 3; }
+  tr.expandable:hover td.stick { background: var(--accent-soft); }
+  th.sorted::after { content: " ▾"; } th.sorted.asc::after { content: " ▴"; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  tr.expandable { cursor: pointer; }
+  tr.expandable:hover td { background: var(--accent-soft); }
+  tr.detail > td { background: var(--bg); padding: 0 12px 12px 30px; }
+  tr.detail table td { border-bottom: 1px dashed var(--line); padding: 6px 10px; }
+  .caret { display: inline-block; width: 14px; color: var(--muted); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .pill.good { background: var(--good-soft); color: var(--good); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .pill.bad { background: var(--bad-soft); color: var(--bad); }
+  .pill.muted { background: var(--accent-soft); color: var(--accent); }
+  .muted { color: var(--muted); }
+  .owed { color: var(--warn); font-weight: 600; }
+  .empty { padding: 24px; text-align: center; color: var(--muted); }
+  .kpi.clickable { cursor: pointer; }
+  .kpi.clickable:hover, .kpi.clickable:focus-visible { border-color: var(--accent); outline: none; }
+  .drawer { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); z-index: 20; display: flex; justify-content: flex-end; }
+  .drawer[hidden] { display: none; }
+  .drawer-card { background: var(--bg); width: min(980px, 100%); height: 100%; overflow: auto; padding: 20px 24px;
+                 border-left: 1px solid var(--line); position: relative; }
+  .drawer-card h2 { margin: 0 0 6px; font-size: 18px; }
+  .drawer-card .panel { max-height: none; }
+  .drawer-close { position: absolute; top: 14px; right: 16px; background: none; border: 0; color: var(--muted);
+                  font-size: 18px; cursor: pointer; }
+  @media (max-width: 640px) {
+    header, main { padding-left: 16px; padding-right: 16px; }
+    .stick { min-width: 140px; max-width: 170px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Walmart Lucernex Tracker</h1>
+  <span id="synced" class="synced"></span>
+  <a class="synced" href="https://docs.google.com/spreadsheets/d/1KiUNOPrdBXXutLR-uiXgjz4KrVIn2FkbqR1vRBOBWB4/edit"
+     target="_blank" rel="noopener" title="Add a row with your name; the sync starts within about 5 minutes">Request a sync ↗</a>
+</header>
+<main>
+  <section class="kpis" id="kpis"></section>
+  <nav id="tabs"></nav>
+  <div class="toolbar">
+    <input type="search" id="search" placeholder="Search…" autocomplete="off">
+    <span id="filters" class="filters"></span>
+    <span class="rowcount" id="rowcount"></span>
+  </div>
+  <p class="hint" id="hint"></p>
+  <div class="panel" id="view"></div>
+</main>
+<div id="drawer" class="drawer" hidden>
+  <div class="drawer-card"><button class="drawer-close" aria-label="Close">✕</button><div id="drawer-body"></div></div>
+</div>
+
+<script>
+const DATA = null /*DATA*/;
+if (!DATA) {
+  document.querySelector("main").innerHTML = `<div class="panel empty">This is the template, not the dashboard.
+    Open <b>data/dashboard.html</b> instead (run <code>python lxsync.py dashboard</code> to build it).</div>`;
+  throw new Error("dashboard template opened without data");
+}
+
+const money = v => v == null || v === "" || isNaN(v) ? "" :
+  Number(v).toLocaleString("en-US", { style: "currency", currency: "USD" });
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const parseDate = s => { const m = /^(\d\d)\/(\d\d)\/(\d{4})$/.exec(s || ""); return m ? new Date(+m[3], m[1] - 1, +m[2]) : null; };
+const sortableDate = s => { const d = parseDate(s); return d ? d.getTime() : 0; };
+const daysSince = s => { const d = parseDate(s); return d ? Math.floor((Date.now() - d) / 864e5) : null; };
+const digits = s => s.replace(/[^0-9.]/g, "");
+
+// A search that looks like an amount matches money columns within a dollar,
+// so AR can paste a bank deposit amount and find the payment.
+function matches(query, text, amounts) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const n = parseFloat(digits(q));
+  if (/^\$?[\d,]+(\.\d*)?$/.test(q) && !isNaN(n) && amounts.some(a => Math.abs(Number(a) - n) < 1)) return true;
+  return q.split(/\s+/).every(t => text.toLowerCase().includes(t));
+}
+
+// ------------------------------------------------------------------ tabs
+const pill = (text, tone) => text ? `<span class="pill ${tone}">${esc(text)}</span>` : "";
+// Unpaid balances stand out; zero shows as a quiet dash.
+const dash = r => r.po_numbers !== undefined ? `<span class="muted">—</span>` : "";
+const unpaidCell = v => v > 0.005 ? `<span class="owed">${money(v)}</span>` : `<span class="muted">—</span>`;
+const LX_TONE = { Approved: "good", Submitted: "muted", "Not submitted": "bad" };
+const STRIPE_TONE = { paid: "good", open: "warn", void: "muted", draft: "muted", uncollectible: "bad" };
+const PAY_TONE = { Paid: "good", Unpaid: "warn", Void: "muted" };
+const REFUND_TONE = {
+  "Paid twice": "bad", "Paid against voided invoice": "bad", "Possible double payment": "warn",
+  "Unapplied cash in Stripe": "warn", "Customer credit in Stripe": "warn", "Overpaid invoice": "bad",
+};
+const RECON_TONE = {
+  "Paid in Lucernex, void in Stripe": "bad", "Paid in Lucernex, open in Stripe": "warn",
+  "Paid in Lucernex, no Stripe invoice": "muted", "Amounts differ": "warn", "Reissued, paid": "good",
+  "Not submitted in Lucernex": "bad", "Duplicate withheld": "good",
+};
+const BILLING_TONE = {
+  "Fully paid": "good", "Paid to date, PO balance left": "good", "Awaiting payment": "warn",
+  "PO issued, not billed": "muted", "No PO yet": "bad", "Not in Lucernex": "bad",
+};
+
+const TABS = {
+  payments: {
+    label: "Payments", rows: DATA.payments,
+    hint: "Click a payment to see its invoices. Type a deposit amount (e.g. 45762.10) to find it.",
+    cols: [
+      { nowrap: true, key: "check_date", label: "Date", sort: r => sortableDate(r.check_date) },
+      { nowrap: true, key: "check_number", label: "Payment #" },
+      { key: "method", label: "Method" },
+      { key: "check_amount", label: "Deposit", num: true, fmt: money },
+      { key: "pay_app_count", label: "Invoices", num: true },
+      { key: "pay_app_total", label: "Invoices found", num: true, fmt: money },
+      { key: "match", label: "", render: r => r.gap ? pill(`${money(r.gap)} unaccounted`, "warn") : pill("Fully matched", "good") },
+    ],
+    defaultSort: { key: "check_date", desc: true },
+    text: r => [r.check_number, r.check_date, ...r.pay_apps.map(p => `${p.project_name} ${p.po_number} ${p.supplier_invoice_number}`)].join(" "),
+    amounts: r => [r.check_amount, ...r.pay_apps.map(p => p.amount)],
+    detail: r => `<table>${r.pay_apps.map(p => `<tr>
+        <td>${esc(p.project_name)}</td><td>PO ${esc(p.po_number)}</td><td>Pay app #${esc(p.application_number)}</td>
+        <td>Invoice ${esc(p.supplier_invoice_number || "—")}</td>
+        <td class="muted">submitted ${esc(p.application_date)}</td><td class="num">${money(p.amount)}</td></tr>`).join("")}</table>`,
+  },
+  invoices: {
+    label: "Invoices", rows: DATA.invoices,
+    hint: `Every Lucernex pay app, plus Stripe invoices never submitted in Lucernex (Source: "Stripe only"). ` +
+      `Paid means Walmart recorded a check in Lucernex, or the Stripe invoice is paid.` +
+      (DATA.recon_count ? ` ${DATA.recon_count} paid in Lucernex need fixing in Stripe — filter "Stripe check".` : ""),
+    filters: [
+      { key: "source", label: "Source" },
+      { key: "payment_status", label: "Payment" },
+      { key: "status", label: "Lucernex" },
+      { key: "stripe_status", label: "Stripe" },
+      { key: "paid_via", label: "Paid via" },
+      { key: "recon", label: "Stripe check" },
+    ],
+    cols: [
+      { key: "project_name", label: "Project" },
+      { nowrap: true, key: "po_number", label: "PO" },
+      { key: "application_number", label: "Pay app #" },
+      { nowrap: true, key: "supplier_invoice_number", label: "Invoice #", render: r => esc(r.supplier_invoice_number) +
+          (r.invoice_inferred ? `<div class="muted" style="font-size:12px" title="Pay app's Supplier Invoice Number was ${esc(r.original_invoice_number || "blank")}; matched to this Stripe invoice by project and amount">matched by amount</div>` : "") },
+      { nowrap: true, key: "application_date", label: "Submitted / invoiced", sort: r => sortableDate(r.application_date) },
+      { key: "amount", label: "Amount", num: true, fmt: money },
+      { key: "status", label: "Lucernex", render: r => pill(r.status || "—", LX_TONE[r.status] || "muted") +
+          (r.ap_status && r.ap_status !== "Success" ? " " + `<span class="pill bad" title="${esc(r.ap_error || r.ap_status)}">AP: ${esc(r.ap_status)}</span>` : "") },
+      { key: "stripe_status", label: "Stripe", render: r => (r.stripe_status ? pill(r.stripe_status, STRIPE_TONE[r.stripe_status] || "muted")
+          : (DATA.stripe_connected && r.supplier_invoice_number ? pill("not found", "warn") : "")) +
+          (r.stripe_reissued_as ? `<div class="muted" style="font-size:12px">reissued as ${esc(r.stripe_reissued_as)}</div>` : "") },
+      { key: "payment_status", label: "Payment", render: r => pill(r.payment_status, PAY_TONE[r.payment_status]) },
+      { nowrap: true, key: "paid_date", label: "Paid", sort: r => sortableDate(r.paid_date),
+        render: r => r.paid_date ? `${esc(r.paid_date)} <span class="muted">${esc(r.paid_via)}</span>` : "" },
+      { key: "age", label: "Days unpaid", num: true, render: r => r.age == null ? "" :
+          pill(String(r.age), r.age > 60 ? "bad" : r.age > 30 ? "warn" : "muted") },
+      { key: "recon", label: "Stripe check", render: r => r.recon
+          ? `<span class="pill ${RECON_TONE[r.recon] || "warn"}" title="${esc(r.recon_note)}">${esc(r.recon)}</span>
+             <div class="muted" style="font-size:12px;margin-top:2px;max-width:320px">${esc(r.recon_note)}</div>` : "" },
+    ],
+    defaultSort: { key: "application_date", desc: true },
+    text: r => `${r.project_name} ${r.po_number} ${r.supplier_invoice_number} ${r.check_number} ${r.ap_error}`,
+    amounts: r => [r.amount],
+  },
+  projects: {
+    label: "Projects", rows: DATA.projects,
+    hint: "Pulley's Walmart and Sam's Club projects. Permit fees count as invoiced once they're on a Lucernex pay app; " +
+      "open Stripe permit invoices not submitted yet are \"uninvoiced\"" +
+      (DATA.projects.some(r => r.uninvoiced_partial === false) ? "." : " (plus Pulley-paid fees with no Stripe invoice, once the sheet has uninvoiced_pulley_fees)."),
+    filters: [
+      { key: "billing_status", label: "Billing" },
+      { key: "po_fee_check", label: "PO vs fees" },
+      { key: "org", label: "Customer" },
+      { key: "pulley_status", label: "Pulley status" },
+    ],
+    cols: [
+      { key: "pulley_project", label: "Project",
+        // Lucernex names start with the store number; older Pulley names don't.
+        sort: r => (r.lucernex_project || r.pulley_project.replace(/^[^|]*\|\s*/, "")).toLowerCase(),
+        render: r => (r.pulley_project ? esc(r.pulley_project)
+          : `<span class="muted">${esc(r.lucernex_project)}</span> ${pill("Not in Pulley", "warn")}`) +
+          (r.po_conflicts ? `<div>${pill(`${r.po_conflicts} invoice PO mismatch`, "bad")}</div>` : "") +
+          (r.merged_records && r.merged_records.length ? `<div><span class="pill muted" title="Also combines: ${esc(r.merged_records.join("; "))}">${r.merged_records.length + 1} Pulley records</span></div>` : "") },
+      { key: "pulley_status", label: "Pulley status", nowrap: true },
+      { key: "po_total", label: "Lucernex PO total approved", group: "Lucernex PO", short: "Approved total", num: true, fmt: money },
+      { key: "co_pending", label: "Change orders requested, not yet approved", group: "Lucernex PO", short: "COs requested, not approved",
+        num: true, render: r => r.co_pending > 0.005 ? `<span class="owed">${money(r.co_pending)}</span>` : dash(r) },
+      { key: "service_invoiced", label: "Service fees invoiced", group: "Service fees", short: "Invoiced", num: true, fmt: money },
+      { key: "service_paid", label: "Service fees paid", group: "Service fees", short: "Paid", num: true, fmt: money },
+      { key: "service_open", label: "Service fees unpaid", group: "Service fees", short: "Unpaid", num: true, render: r => unpaidCell(r.service_open) },
+      { key: "permit_total", label: "Total permit fees on the project (Pulley)", group: "Permit fees", short: "Total on project",
+        num: true, render: r => (r.permit_total == null ? `<span class="muted">—</span>` : money(r.permit_total)) +
+          (r.po_over_approved ? `<div><span class="pill bad" title="PO has ${money(r.permit_approved)} approved for permit fees${
+            r.duplicate_cos && r.duplicate_cos.length ? "; change order " + r.duplicate_cos.map(money).join(", ") + " approved twice" : ""}">PO over-approved by ${money(r.po_over_approved)}</span></div>` : "") },
+      { key: "permit_invoiced", label: "Permit fees invoiced in Lucernex (on a pay app)", group: "Permit fees", short: "Invoiced in Lucernex", num: true, fmt: money },
+      { key: "permit_paid", label: "Permit fees paid (invoiced in Lucernex)", group: "Permit fees", short: "Paid", num: true, fmt: money },
+      { key: "permit_open", label: "Permit fees invoiced in Lucernex but unpaid", group: "Permit fees", short: "Unpaid (invoiced)", num: true, render: r => unpaidCell(r.permit_open) },
+      { key: "uninvoiced_with_co", label: "Permit fees not yet invoiced in Lucernex, change order requested", group: "Permit fees", short: "Uninvoiced, CO requested",
+        num: true, render: r => r.uninvoiced_with_co == null ? "" : unpaidCell(r.uninvoiced_with_co) },
+      { key: "uninvoiced_no_co", label: "Permit fees not yet invoiced in Lucernex, no change order requested", group: "Permit fees", short: "Uninvoiced, no CO",
+        num: true, render: r => r.uninvoiced_no_co == null ? ""
+          : r.uninvoiced_no_co > 0.005 ? `<span class="pill bad">${money(r.uninvoiced_no_co)}</span>` : `<span class="muted">—</span>` },
+      { key: "billing_status", label: "PO status", nowrap: true, render: r => pill(r.billing_status, BILLING_TONE[r.billing_status] || "muted") },
+    ],
+    defaultSort: { key: "pulley_project", desc: false },
+    text: r => `${r.pulley_project} ${r.lucernex_project} ${r.po_numbers} ${r.labels} ${r.org} ${r.fee_invoices.map(i => i.number).join(" ")}`,
+    amounts: r => [r.po_total, r.co_pending, r.service_invoiced, r.permit_invoiced, r.uninvoiced_fees, ...r.fee_invoices.map(i => i.total)],
+    detail: r => `<div class="muted" style="padding:6px 0 8px">
+        ${r.lucernex_project ? `Lucernex: ${esc(r.lucernex_project)} · ` : ""}PO ${esc(r.po_numbers || "none")}
+        ${r.po_numbers ? ` · Left on PO ${money(r.remaining)} · PO less service fees ${money(r.po_less_service)}
+          · Permit fees invoiced vs PO ${money(r.fee_delta)} ${pill(r.po_fee_check, { "PO short": "bad", "PO over": "muted", Matches: "good" }[r.po_fee_check] || "muted")}` : ""}
+        ${r.pulley_fees != null ? ` · Pulley fees (all, incl. Walmart-paid) ${money(r.pulley_fees)}` : ""}</div>` +
+      (r.fee_invoices.length ? `<table>${r.fee_invoices.map(i => `<tr>
+        <td>${pill(i.fee_kind === "permit" ? "Permit fee" : "Service fee", i.fee_kind === "permit" ? "muted" : "good")}
+            <span class="muted">${esc(i.fee_type || "")}</span></td>
+        <td>Invoice ${esc(i.number)}${i.fee_kind === "permit" && !i.in_lucernex && i.status !== "void" ? ` ${pill("Not in Lucernex", "bad")}` : ""}</td><td class="muted">${i.po ? "PO " + esc(i.po) : ""}
+            ${i.po_conflict ? `<div>${pill("Wrong PO", "bad")} <span class="muted">${esc(i.po_conflict)}</span></div>` : ""}</td>
+        <td class="muted">invoiced ${esc(i.created)}</td>
+        <td>${pill(i.status, STRIPE_TONE[i.status] || "muted")} ${i.paid_at ? `<span class="muted">${esc(i.paid_at)}</span>` : ""}</td>
+        <td class="num">${money(i.total)}</td></tr>`).join("")}</table>`
+      : `<div class="muted" style="padding:8px 0">No Stripe invoices linked to this project.</div>`),
+  },
+  issues: {
+    label: "Open issues", rows: DATA.issues,
+    hint: `Everything that needs action, most urgent first. Rows drop off once the data is fixed; ` +
+      `or set status / resolved_date / note in ${DATA.refund_tracking_file}.`,
+    filters: [
+      { key: "group", label: "Group" },
+      { key: "tracking_status", label: "Status" },
+      { key: "priority", label: "Priority" },
+      { key: "category", label: "Issue" },
+    ],
+    defaultFilters: { tracking_status: "Open" },
+    groupBy: "group",
+    groupOrder: DATA.issue_groups,
+    groupNotes: {
+      "Refunds": "Money Walmart paid twice or against a voided invoice",
+      "Pulley's court": "Change orders to request and pay apps to submit (projects with an open PO)",
+      "Fixes": "Corrections on our side: Stripe records, AP rejections, wrong POs, amount mismatches",
+      "Warnings": "In Walmart's court, but taking longer than expected",
+      "Pending with Walmart": "In Walmart's court within normal timing, including projects with no open PO yet",
+    },
+    cols: [
+      { key: "project_name", label: "Project", render: r => esc(r.project_name || "—") },
+      { key: "priority", label: "Priority", nowrap: true, sort: r => ({ High: 0, Medium: 1, Low: 2 })[r.priority],
+        render: r => pill(r.priority, { High: "bad", Medium: "warn", Low: "muted" }[r.priority]) },
+      { key: "category", label: "Issue", render: r => `<b>${esc(r.category)}</b>` },
+      { key: "amount", label: "Amount", num: true, fmt: money },
+      { key: "age", label: "Days", num: true, render: r => r.age == null ? "" : String(r.age) },
+      { key: "detail", label: "What's wrong", render: r => `<div style="max-width:380px">${esc(r.detail)}</div>
+          ${r.reference ? `<div class="muted" style="font-size:12px">${esc(r.reference)}</div>` : ""}` },
+      { key: "action", label: "Next step", render: r => `<div style="max-width:280px">${esc(r.action)}</div>` },
+      { key: "tracking_status", label: "Status", nowrap: true, render: r => pill(r.tracking_status, r.resolved ? "good" : "warn") +
+          (r.resolved_date ? ` <span class="muted">${esc(r.resolved_date)}</span>` : "") },
+      { key: "note", label: "Note", render: r => `<div class="muted" style="max-width:220px">${esc(r.note)}</div>` },
+    ],
+    defaultSort: { key: "priority", desc: false },
+    text: r => `${r.project_name} ${r.category} ${r.reference} ${r.detail} ${r.action} ${r.note}`,
+    amounts: r => [r.amount],
+  },
+  refunds: {
+    label: "Refunds", rows: DATA.refunds,
+    hint: `Money Walmart may have paid twice, or paid against an invoice that no longer stands. ` +
+      `Track each case in ${DATA.refund_tracking_file} (status, resolved_date, note) — it's kept across syncs.`,
+    filters: [
+      { key: "tracking_status", label: "Status" },
+      { key: "type", label: "Type" },
+    ],
+    cols: [
+      { key: "type", label: "Type", render: r => pill(r.type, REFUND_TONE[r.type] || "warn") },
+      { key: "project_name", label: "Project" },
+      { key: "invoice", label: "Invoice #" },
+      { key: "amount", label: "Amount at issue", num: true, fmt: money },
+      { key: "detail", label: "What happened", render: r => `<div style="max-width:380px">${esc(r.detail)}</div>` },
+      { key: "action", label: "Suggested action", render: r => `<div class="muted" style="max-width:260px">${esc(r.action)}</div>` },
+      { key: "tracking_status", label: "Status", render: r => pill(r.tracking_status,
+          /^(refunded|credited|resolved|not needed|closed)/i.test(r.tracking_status) ? "good" : "warn") +
+          (r.resolved_date ? ` <span class="muted">${esc(r.resolved_date)}</span>` : "") },
+      { key: "note", label: "Note", render: r => `<div class="muted" style="max-width:220px">${esc(r.note)}</div>` },
+    ],
+    defaultSort: { key: "amount", desc: true },
+    text: r => `${r.type} ${r.project_name} ${r.invoice} ${r.detail} ${r.note} ${r.pay_apps.map(p => p.check_number).join(" ")}`,
+    amounts: r => [r.amount, ...r.pay_apps.map(p => p.amount)],
+    detail: r => r.pay_apps.length ? `<table>${r.pay_apps.map(p => `<tr>
+        <td>${esc(p.project_name)}</td><td>PO ${esc(p.po_number)}</td><td>Pay app #${esc(p.application_number)}</td>
+        <td>Invoice ${esc(p.supplier_invoice_number || "—")}</td>
+        <td class="muted">paid ${esc(p.check_date)} · payment #${esc(p.check_number)}</td>
+        <td class="num">${money(p.amount)}</td></tr>`).join("")}</table>`
+      : `<div class="muted" style="padding:8px 0">${esc(r.detail)}</div>`,
+  },
+  changes: {
+    label: "Recent changes", rows: DATA.events,
+    hint: "What changed in Lucernex and Stripe between syncs: new POs, approvals, payments.",
+    cols: [
+      { key: "at", label: "Detected", render: r => esc(new Date(r.at).toLocaleString()), sort: r => r.at },
+      { key: "kind", label: "Type", render: r => pill(r.kind, { paid: "good", new: "muted", changed: "warn" }[r.kind] || "muted") },
+      { key: "record_type", label: "Record", render: r => esc(r.record_type.replace(/_/g, " ")) },
+      { key: "project_name", label: "Project" },
+      { key: "summary", label: "Detail" },
+    ],
+    defaultSort: { key: "at", desc: true },
+    text: r => `${r.project_name} ${r.summary} ${r.kind}`,
+    amounts: () => [],
+  },
+};
+
+const TAB_ORDER = ["projects", "issues", "payments", "invoices", "refunds", "changes"];
+let state = { tab: "projects", query: "", sort: {}, open: new Set(), filters: {} };
+try { state.tab = localStorage.getItem("lx-tab-v2") || state.tab; } catch (e) {}
+if (!TABS[state.tab]) state.tab = "projects";
+
+function visibleRows(tab) {
+  const f = state.filters[state.tab] || tab.defaultFilters || {};
+  return tab.rows.filter(r => Object.entries(f).every(([k, v]) => !v || (r[k] || "—") === v)
+                          && matches(state.query, tab.text(r), tab.amounts(r)));
+}
+
+function renderFilters(tab) {
+  const f = state.filters[state.tab] || tab.defaultFilters || {};
+  document.getElementById("filters").innerHTML = (tab.filters || []).map(flt => {
+    const values = [...new Set(tab.rows.map(r => r[flt.key] || "—"))].sort();
+    return `<label class="filter">${flt.label}
+      <select data-filter="${flt.key}"><option value="">All</option>${values.map(v =>
+        `<option ${f[flt.key] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>`;
+  }).join("");
+}
+
+function render() {
+  const tab = TABS[state.tab];
+  document.getElementById("tabs").innerHTML = TAB_ORDER.map(id => [id, TABS[id]]).map(([id, t]) =>
+    `<button data-tab="${id}" class="${id === state.tab ? "active" : ""}">${t.label}<span class="count">${t.rows.length}</span></button>`).join("");
+  document.getElementById("hint").textContent = tab.hint;
+  renderFilters(tab);
+
+  const sort = state.sort[state.tab] || tab.defaultSort;
+  const col = tab.cols.find(c => c.key === sort.key);
+  const keyOf = col && col.sort ? col.sort : r => r[sort.key];
+  const groupIndex = r => tab.groupBy ? tab.groupOrder.indexOf(r[tab.groupBy]) : 0;
+  const rows = visibleRows(tab).sort((a, b) => {
+    if (groupIndex(a) !== groupIndex(b)) return groupIndex(a) - groupIndex(b);
+    let x = keyOf(a) ?? "", y = keyOf(b) ?? "";
+    if (col && col.num) { x = +x || 0; y = +y || 0; }
+    return (x < y ? -1 : x > y ? 1 : 0) * (sort.desc ? -1 : 1);
+  });
+
+  const amountCol = tab.cols.find(c => c.key === "amount" || c.key === "check_amount");
+  const total = amountCol ? rows.reduce((s, r) => s + (+r[amountCol.key] || 0), 0) : null;
+  document.getElementById("rowcount").textContent =
+    `${rows.length} of ${tab.rows.length}` + (total != null ? ` · ${money(total)}` : "");
+
+  if (!rows.length) { document.getElementById("view").innerHTML = `<div class="empty">Nothing matches.</div>`; return; }
+  // Optional second header row: consecutive columns sharing a `group` get one spanning label.
+  const hasGroups = tab.cols.some(c => c.group);
+  const groupRow = hasGroups ? `<tr class="groups">${tab.cols.reduce((acc, c) => {
+      const last = acc[acc.length - 1];
+      if (last && c.group && last.group === c.group) last.span++;
+      else acc.push({ group: c.group || "", span: 1 });
+      return acc;
+    }, []).map((g, i) => `<th colspan="${g.span}" class="${g.group ? "grouped" : ""}${i === 0 ? " stick" : ""}">${esc(g.group)}</th>`).join("")}</tr>` : "";
+  const cls = (c, i) => [c.num ? "num" : "", c.nowrap ? "nowrap" : "", i === 0 ? "stick" : ""].join(" ").trim();
+  const head = groupRow + `<tr class="cols">${tab.cols.map((c, i) =>
+    `<th data-sort="${c.key}" class="${cls(c, i)}${c.key === sort.key ? " sorted" + (sort.desc ? "" : " asc") : ""}">${c.group ? c.short || c.label : c.label}</th>`).join("")}</tr>`;
+  // Section header rows (e.g. Open issues by group) with each section's count and total.
+  const sectionRow = g => {
+    const inGroup = rows.filter(r => r[tab.groupBy] === g);
+    const total = inGroup.reduce((s, r) => s + (+r.amount || 0), 0);
+    return `<tr class="section"><td colspan="${tab.cols.length}"><span class="section-title">${esc(g)}</span>
+      <span class="muted">${inGroup.length} · ${money(total)}${tab.groupNotes && tab.groupNotes[g] ? " · " + esc(tab.groupNotes[g]) : ""}</span></td></tr>`;
+  };
+  let lastGroup = null;
+  const body = rows.map((r, i) => {
+    let header = "";
+    if (tab.groupBy && r[tab.groupBy] !== lastGroup) { lastGroup = r[tab.groupBy]; header = sectionRow(lastGroup); }
+    const id = r.id ?? i;
+    const open = state.open.has(String(id));
+    const cells = tab.cols.map((c, ci) => {
+      const content = c.render ? c.render(r) : c.fmt ? c.fmt(r[c.key]) : esc(r[c.key]);
+      // The expand arrow sits inside the first cell, so that column can be pinned.
+      const caret = ci === 0 && tab.detail ? `<span class="caret">${open ? "▾" : "▸"}</span>` : "";
+      return `<td class="${cls(c, ci)}">${caret}${content}</td>`;
+    }).join("");
+    if (!tab.detail) return `${header}<tr>${cells}</tr>`;
+    return `${header}<tr class="expandable" data-open="${esc(id)}">${cells}</tr>` +
+      (open ? `<tr class="detail"><td colspan="${tab.cols.length}">${tab.detail(r)}</td></tr>` : "");
+  }).join("");
+  const view = document.getElementById("view");
+  view.innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+  if (hasGroups) {
+    const h = view.querySelector("thead tr.groups").offsetHeight;
+    view.style.setProperty("--group-row-h", `${h}px`);
+  }
+  fitPanel();
+}
+
+// Size the table panel to fill the window below the toolbar, so only the table scrolls.
+function fitPanel() {
+  const view = document.getElementById("view");
+  // On small screens the stacked cards leave too little room; let the page scroll instead.
+  if (innerWidth <= 640 || innerHeight < 600) { view.style.maxHeight = "75vh"; return; }
+  const bottomPad = parseFloat(getComputedStyle(document.querySelector("main")).paddingBottom) || 0;
+  view.style.maxHeight = `${Math.max(240, innerHeight - view.getBoundingClientRect().top - window.scrollY - bottomPad - 2)}px`;
+}
+addEventListener("resize", fitPanel);
+
+document.getElementById("tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-tab]"); if (!b) return;
+  state.tab = b.dataset.tab; state.open.clear();
+  try { localStorage.setItem("lx-tab-v2", state.tab); } catch (err) {}
+  render();
+});
+document.getElementById("filters").addEventListener("change", e => {
+  const s = e.target.closest("select[data-filter]"); if (!s) return;
+  state.filters[state.tab] = { ...(state.filters[state.tab] || TABS[state.tab].defaultFilters || {}), [s.dataset.filter]: s.value };
+  render();
+});
+document.getElementById("view").addEventListener("click", e => {
+  const th = e.target.closest("th[data-sort]");
+  if (th) {
+    const cur = state.sort[state.tab] || TABS[state.tab].defaultSort;
+    state.sort[state.tab] = { key: th.dataset.sort, desc: cur.key === th.dataset.sort ? !cur.desc : true };
+    return render();
+  }
+  const tr = e.target.closest("tr[data-open]");
+  if (tr) { const id = tr.dataset.open; state.open.has(id) ? state.open.delete(id) : state.open.add(id); render(); }
+});
+document.getElementById("search").addEventListener("input", e => { state.query = e.target.value; render(); });
+
+// ------------------------------------------------------------------ header
+const synced = new Date(DATA.synced_at);
+const hours = (Date.now() - synced) / 36e5;
+const syncedEl = document.getElementById("synced");
+// A run can stop part-way through Lucernex when the session ends; say so, and how old the
+// least-recently refreshed Lucernex project is.
+const partial = DATA.lucernex_total && DATA.lucernex_done < DATA.lucernex_total;
+const oldest = DATA.lucernex_oldest ? new Date(DATA.lucernex_oldest) : null;
+syncedEl.textContent = `Last synced ${synced.toLocaleString()}` +
+  (partial ? ` — Lucernex: ${DATA.lucernex_done} of ${DATA.lucernex_total} projects refreshed` +
+             (oldest ? ` (rest as of ${oldest.toLocaleString()})` : "") + "; log in and sync again to finish" : "") +
+  (hours > 24 ? " — over a day old, run a sync" : "");
+if (hours > 24 || partial) syncedEl.classList.add("stale");
+
+const k = DATA.kpis;
+document.getElementById("kpis").innerHTML = [
+  ["Paid, last 30 days", money(k.paid_30d), `${k.payments_30d} payments`],
+  ["Approved, awaiting payment", money(k.approved_unpaid), `${k.approved_unpaid_count} invoices`],
+  ["Submitted, awaiting approval", money(k.submitted), `${k.submitted_count} invoices`],
+  ["Open PO balance", money(k.open_po_balance), `${k.open_po_count} POs · excludes ${money(k.open_po_excess)} Pulley won't bill · click for breakdown`, "pos"],
+  ["Invoiced, not in Lucernex", money(k.not_submitted), `${k.not_submitted_count} open Stripe invoices to submit · click for breakdown`, "notsub"],
+].map(([l, v, s, b]) => `<div class="kpi${b ? " clickable" : ""}"${b ? ` data-breakdown="${b}" role="button" tabindex="0"` : ""}>
+  <div class="label">${l}</div><div class="value">${v}</div><div class="sub">${s}</div></div>`).join("");
+
+// Breakdown panel behind a summary card (currently: open PO balance by PO).
+function openPoBreakdown() {
+  const rows = [...DATA.open_pos].sort((a, b) => b.billable_left - a.billable_left || b.remaining - a.remaining);
+  const byStatus = {};
+  for (const r of rows.filter(r => r.billable_left >= 1)) {
+    const s = (byStatus[r.pulley_status] ||= { count: 0, total: 0 });
+    s.count++; s.total += r.billable_left;
+  }
+  const lucernex = rows.reduce((t, r) => t + r.remaining, 0);
+  const total = rows.reduce((t, r) => t + r.billable_left, 0);
+  const summary = Object.entries(byStatus).sort((a, b) => b[1].total - a[1].total).map(([st, v]) =>
+    `<span class="pill ${st === "Canceled" ? "bad" : st === "In Progress" ? "good" : "muted"}">${esc(st)}</span>
+     ${v.count} POs · ${money(v.total)}`).join(" &nbsp; ");
+  document.getElementById("drawer-body").innerHTML = `
+    <h2>Open PO balance: ${money(total)}</h2>
+    <p class="muted">What Pulley can still bill on each PO: the service fee plus the permit fees Pulley bills (live Stripe permit
+      invoices, in Lucernex or not), minus pay apps billed. Lucernex shows ${money(lucernex)} left across these POs; the
+      ${money(lucernex - total)} difference is excluded: excess approved above what the project needs (e.g. a change order approved
+      twice) and fees Walmart paid the AHJ directly. Pulley-paid fees not invoiced in Stripe yet aren't counted until the sheet has
+      uninvoiced_pulley_fees. On canceled projects the balance will likely never be billed.</p>
+    <p>${summary}</p>
+    <div class="panel"><table>
+      <thead><tr><th>Project</th><th>Pulley status</th><th>PO</th><th class="num">Revised PO</th><th class="num">Billed</th><th class="num">Left in Lucernex</th><th class="num">Excess (excluded)</th><th class="num">Open balance</th><th class="num">% of total</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td>${esc(r.project_name)}${r.over_approved ? `<div>${pill(`PO over-approved by ${money(r.over_approved)}`, "bad")}</div>` : ""}</td>
+        <td>${pill(r.pulley_status, r.pulley_status === "Canceled" ? "bad" : r.pulley_status === "In Progress" ? "good" : "muted")}</td>
+        <td class="nowrap">${esc(r.po_number)}</td>
+        <td class="num">${money(r.revised_amount)}</td><td class="num">${money(r.billed)}</td>
+        <td class="num muted">${money(r.remaining)}</td>
+        <td class="num">${r.remaining - r.billable_left >= 0.01 ? `<span class="owed">${money(r.remaining - r.billable_left)}</span>` : `<span class="muted">—</span>`}</td>
+        <td class="num" title="Service fee + permit fees Pulley bills (live Stripe invoices), less billed"><b>${money(r.billable_left)}</b></td>
+        <td class="num muted">${total ? (100 * r.billable_left / total).toFixed(1) : "0.0"}%</td></tr>`).join("")}</tbody>
+    </table></div>`;
+  document.getElementById("drawer").hidden = false;
+}
+// Breakdown of open Stripe invoices not yet in Lucernex, by project and next step.
+const STEP_TONE = { "Ready to submit": "good", "Waiting on CO approval": "muted", "Needs change order": "bad", "Waiting on Walmart PO": "warn" };
+function openNotSubmittedBreakdown() {
+  const rows = DATA.not_submitted;
+  const stepOrder = Object.keys(STEP_TONE);
+  const byStep = Object.fromEntries(stepOrder.map(s => [s, { count: 0, total: 0 }]));
+  for (const r of rows) for (const [s, amt] of Object.entries(r.steps)) { byStep[s].count++; byStep[s].total += amt; }
+  const total = rows.reduce((t, r) => t + r.total, 0);
+  const invoiceCount = rows.reduce((t, r) => t + r.invoices.length, 0);
+  const summary = stepOrder.filter(s => byStep[s].count).map(s =>
+    `${pill(s, STEP_TONE[s])} ${byStep[s].count} projects · ${money(byStep[s].total)}`).join(" &nbsp; ");
+  document.getElementById("drawer-body").innerHTML = `
+    <h2>Invoiced, not in Lucernex: ${money(total)}</h2>
+    <p class="muted">${invoiceCount} open Stripe invoices on ${rows.length} projects that aren't on a Lucernex pay app yet, so Walmart
+      can't pay them. Each project's amount is split by next step, the same way as Open issues: first what fits the PO's remaining
+      balance (ready to submit), then what a requested change order covers, then what still needs a change order. Projects with no
+      PO wait on Walmart.</p>
+    <p>${summary}</p>
+    <div class="panel"><table>
+      <thead><tr><th>Project</th><th>Pulley status</th><th>PO</th>${stepOrder.map(s => `<th class="num">${s}</th>`).join("")}<th class="num">Total</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>
+        <td><b>${esc(r.project_name)}</b>
+          <div class="muted" style="font-size:12px;margin-top:4px">${r.invoices.map(i =>
+            `${esc(i.supplier_invoice_number)} · ${esc(i.fee_kind)} · ${money(i.amount)} · ${i.age ?? "?"} days` +
+            (i.draft_pay_app ? ` · draft pay app #${esc(i.draft_pay_app)}` : "")).join("<br>")}</div></td>
+        <td class="nowrap">${r.pulley_status ? pill(r.pulley_status, r.pulley_status === "Canceled" ? "bad" : r.pulley_status === "In Progress" ? "good" : "muted") : ""}</td>
+        <td class="nowrap">${esc(r.po_numbers || "—")}</td>
+        ${stepOrder.map(s => `<td class="num">${r.steps[s] ? `<span class="pill ${STEP_TONE[s]}">${money(r.steps[s])}</span>` : `<span class="muted">—</span>`}</td>`).join("")}
+        <td class="num"><b>${money(r.total)}</b></td></tr>`).join("")}</tbody>
+    </table></div>`;
+  document.getElementById("drawer").hidden = false;
+}
+
+const BREAKDOWNS = { pos: openPoBreakdown, notsub: openNotSubmittedBreakdown };
+document.getElementById("kpis").addEventListener("click", e => {
+  const card = e.target.closest("[data-breakdown]");
+  if (card) BREAKDOWNS[card.dataset.breakdown]();
+});
+document.getElementById("kpis").addEventListener("keydown", e => {
+  const card = e.target.closest("[data-breakdown]");
+  if ((e.key === "Enter" || e.key === " ") && card) { e.preventDefault(); BREAKDOWNS[card.dataset.breakdown](); }
+});
+document.getElementById("drawer").addEventListener("click", e => {
+  if (e.target.id === "drawer" || e.target.closest(".drawer-close")) document.getElementById("drawer").hidden = true;
+});
+addEventListener("keydown", e => { if (e.key === "Escape") document.getElementById("drawer").hidden = true; });
+
+render();
+</script>
+</body>
+</html>

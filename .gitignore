@@ -1,0 +1,10 @@
+# Logins and keys: Lucernex session, Stripe key, Google service account
+.auth/
+stripe_key.txt
+*service_account*.json
+
+# Walmart billing data, the generated dashboard, logs and tracking files
+data/
+*.db
+
+__pycache__/
